@@ -1,0 +1,216 @@
+body { 
+    font-family: Arial; 
+    max-width: 800px; 
+    margin: 0 auto; 
+    padding: 20px; 
+}
+.container { 
+    background: #f9f9f9; 
+    border-radius: 8px; 
+    padding: 20px; 
+}
+h1 { 
+    color: #2c3e50; 
+    border-bottom: 2px solid #3498db; 
+    padding-bottom: 10px; 
+}
+.form-group { 
+    margin-bottom: 15px; 
+}
+label { 
+    display: block; 
+    margin-bottom: 5px; 
+    font-weight: bold; 
+}
+textarea { 
+    width: 100%; 
+    padding: 8px; 
+    border: 1px solid #ddd; 
+    border-radius: 4px; 
+    min-height: 100px; 
+}
+button { 
+    background: #3498db; 
+    color: white; 
+    border: none; 
+    padding: 10px 20px; 
+    border-radius: 4px; 
+    cursor: pointer; 
+}
+button:hover { 
+    background: #2980b9; 
+}
+.results { 
+    margin-top: 20px; 
+    display: none; 
+}
+.section { 
+    margin-bottom: 25px; 
+    border-bottom: 1px solid #eee;
+    padding-bottom: 15px;
+}
+.section-title { 
+    font-weight: bold; 
+    color: #2c3e50; 
+    margin-bottom: 10px; 
+    font-size: 1.2em; 
+}
+ul { 
+    padding-left: 20px; 
+}
+.skill-item { 
+    border: 1px solid #ddd; 
+    padding: 10px; 
+    margin-bottom: 10px; 
+    border-radius: 4px; 
+    background-color: #fff;
+}
+.skill-header { 
+    font-weight: bold; 
+    margin-bottom: 5px; 
+}
+.skill-rating { 
+    color: #e67e22; 
+    margin-right: 15px; 
+}
+.skill-importance { 
+    color: #3498db; 
+}
+.skill-notes { 
+    margin-top: 5px; 
+    color: #555; 
+}
+.gap-stat { 
+    display: inline-block; 
+    margin-right: 20px; 
+    margin-bottom: 10px; 
+    background: #f1f1f1;
+    padding: 8px 12px;
+    border-radius: 4px;
+}
+.gap-value { 
+    font-weight: bold; 
+    color: #3498db; 
+}
+.critical-gaps { 
+    margin-top: 10px; 
+    font-weight: bold;
+}
+li {
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+/* Tab Navigation */
+.tabs {
+    display: flex;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #ddd;
+}
+.tab-button {
+    background: #f1f1f1;
+    border: none;
+    outline: none;
+    cursor: pointer;
+    padding: 10px 20px;
+    margin-right: 5px;
+    border-radius: 4px 4px 0 0;
+    transition: 0.3s;
+}
+.tab-button:hover {
+    background: #ddd;
+}
+.tab-button.active {
+    background: #3498db;
+    color: white;
+}
+.tab-content {
+    display: none;
+    padding: 15px 0;
+}
+.tab-content.active {
+    display: block;
+}
+
+/* Download Link Styling */
+#download-link a {
+    display: inline-block;
+    background: #27ae60;
+    color: white;
+    padding: 10px 20px;
+    text-decoration: none;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+#download-link a:hover {
+    background: #219955;
+}
+
+/* Job Details Styling */
+#job-details {
+    margin-top: 10px;
+}
+.job-detail {
+    display: block;
+    margin-bottom: 5px;
+}
+.job-detail-label {
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+/* Integration Percentage Styling */
+#integration-percentage {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #27ae60;
+    margin-top: 10px;
+}
+
+/* Add styles for error messages and raw response display */
+.error-message {
+    background-color: #ffebee;
+    color: #c62828;
+    border-left: 4px solid #c62828;
+    padding: 12px 15px;
+    margin: 15px 0;
+    border-radius: 3px;
+    font-weight: 500;
+}
+
+.error-details {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #f5f5f5;
+    border-radius: 3px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 14px;
+    color: #333;
+}
+
+.raw-response {
+    margin: 15px 0;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+.raw-response h3 {
+    margin-top: 0;
+    color: #546e7a;
+    font-size: 18px;
+}
+
+.raw-response pre {
+    background-color: #f0f0f0;
+    padding: 15px;
+    border-radius: 3px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: monospace;
+    max-height: 500px;
+    overflow-y: auto;
+} 

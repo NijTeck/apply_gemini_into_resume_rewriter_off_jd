@@ -1,0 +1,195 @@
+name: Terraform + Container Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - '*.tf'
+      - 'terraform.tfvars'
+      - 'requirements.txt'
+      - 'app.py'
+  workflow_dispatch:
+
+env:
+  CONTAINER_REGISTRY: 'laeintelregistry.azurecr.io'
+  IMAGE_REPOSITORY: 'resume-optimizer'
+  AZURE_LOCATION: 'eastus'
+  TERRAFORM_VERSION: '1.5.7'
+
+jobs:
+  terraform:
+    name: 'Terraform Infrastructure'
+    runs-on: ubuntu-latest
+    outputs:
+      storage_account_name: ${{ steps.terraform-output.outputs.storage_account_name }}
+      container_app_name: ${{ steps.terraform-output.outputs.container_app_name }}
+      resource_group_name: ${{ steps.terraform-output.outputs.resource_group_name }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TERRAFORM_VERSION }}
+        terraform_wrapper: false
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set Azure Subscription
+      run: |
+        az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+    - name: Terraform Init
+      run: |
+        terraform init \
+          -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+          -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+          -backend-config="resource_group_name=laeintel-resume-rg" \
+          -backend-config="storage_account_name=laeintelterraformstate" \
+          -backend-config="container_name=tfstate" \
+          -backend-config="key=resume-optimizer.tfstate"
+
+    - name: Terraform Plan
+      run: |
+        terraform plan \
+          -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+          -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+          -var="gemini_api_key=${{ secrets.GEMINI_API_KEY }}" \
+          -out=tfplan
+
+    - name: Terraform Apply
+      run: terraform apply -auto-approve tfplan
+
+    - name: Get Terraform Outputs
+      id: terraform-output
+      run: |
+        STORAGE_ACCOUNT_NAME=$(terraform output -raw storage_account_name)
+        RESOURCE_GROUP_NAME=$(terraform output -raw resource_group_name)
+        
+        echo "storage_account_name=$STORAGE_ACCOUNT_NAME" >> $GITHUB_OUTPUT
+        echo "resource_group_name=$RESOURCE_GROUP_NAME" >> $GITHUB_OUTPUT
+        
+        # For container apps, we'll use the predefined name
+        echo "container_app_name=laeintel-resume-app" >> $GITHUB_OUTPUT
+
+  build-and-deploy:
+    name: 'Build and Deploy Container'
+    runs-on: ubuntu-latest
+    needs: terraform
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set build number
+      run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Set Azure Subscription
+      run: |
+        az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+    - name: Build and Push Docker Image
+      run: |
+        # Login to ACR
+        az acr login --name laeintelregistry
+        
+        # Build the Docker image
+        docker build -t ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_REPOSITORY }}:${{ env.BUILD_NUMBER }} \
+                     -t ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_REPOSITORY }}:latest .
+        
+        # Push the Docker images
+        docker push ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_REPOSITORY }}:${{ env.BUILD_NUMBER }}
+        docker push ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_REPOSITORY }}:latest
+
+    - name: Create Container App Environment
+      run: |
+        RESOURCE_GROUP="${{ needs.terraform.outputs.resource_group_name }}"
+        
+        if ! az containerapp env show --name laeintel-resume-env --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+          echo "Creating container app environment..."
+          az containerapp env create \
+            --name laeintel-resume-env \
+            --resource-group "$RESOURCE_GROUP" \
+            --location "${{ env.AZURE_LOCATION }}" \
+            --logs-workspace-id default
+        fi
+
+    - name: Deploy Container App
+      run: |
+        RESOURCE_GROUP="${{ needs.terraform.outputs.resource_group_name }}"
+        STORAGE_ACCOUNT_NAME="${{ needs.terraform.outputs.storage_account_name }}"
+        CONTAINER_APP_NAME="${{ needs.terraform.outputs.container_app_name }}"
+        
+        # Get Storage Connection String
+        STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
+          --name "$STORAGE_ACCOUNT_NAME" \
+          --resource-group "$RESOURCE_GROUP" \
+          --query connectionString \
+          --output tsv)
+        
+        # Check if Container App exists, create or update
+        if ! az containerapp show --name "$CONTAINER_APP_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+          echo "Creating new container app..."
+          az containerapp create \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --environment laeintel-resume-env \
+            --image ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_REPOSITORY }}:latest \
+            --ingress external \
+            --target-port 8000 \
+            --min-replicas 1 \
+            --env-vars \
+              GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+              BLOB_CONNECTION_STRING="$STORAGE_CONNECTION_STRING" \
+              RESUME_CONTAINER_NAME="resumes" \
+              TAILORED_RESUME_CONTAINER_NAME="tailoredresumecontainer" \
+              TRACKING_CONTAINER_NAME="trackingcontainer" \
+              TRACKING_FILE_NAME="resume_tracking.csv" \
+              DEBUG="true" \
+              PYTHONUNBUFFERED="1" \
+              PYTHONPATH="/app"
+        else
+          echo "Updating existing container app..."
+          az containerapp update \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image ${{ env.CONTAINER_REGISTRY }}/${{ env.IMAGE_REPOSITORY }}:latest \
+            --set-env-vars \
+              GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+              BLOB_CONNECTION_STRING="$STORAGE_CONNECTION_STRING" \
+              RESUME_CONTAINER_NAME="resumes" \
+              TAILORED_RESUME_CONTAINER_NAME="tailoredresumecontainer" \
+              TRACKING_CONTAINER_NAME="trackingcontainer" \
+              TRACKING_FILE_NAME="resume_tracking.csv" \
+              DEBUG="true" \
+              PYTHONUNBUFFERED="1" \
+              PYTHONPATH="/app"
+        fi
+
+    - name: Verify Deployment
+      run: |
+        RESOURCE_GROUP="${{ needs.terraform.outputs.resource_group_name }}"
+        CONTAINER_APP_NAME="${{ needs.terraform.outputs.container_app_name }}"
+        
+        # Get the FQDN of the deployed app
+        FQDN=$(az containerapp show \
+          --name "$CONTAINER_APP_NAME" \
+          --resource-group "$RESOURCE_GROUP" \
+          --query properties.configuration.ingress.fqdn \
+          --output tsv)
+        
+        echo "🚀 Application deployed successfully!"
+        echo "📱 Application URL: https://$FQDN"
+        echo "🔗 Health Check: https://$FQDN/health" 

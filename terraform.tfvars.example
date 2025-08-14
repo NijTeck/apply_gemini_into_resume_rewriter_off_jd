@@ -1,0 +1,29 @@
+# Azure tenant ID (required)
+tenant_id = "00000000-0000-0000-0000-000000000000"
+
+# Azure subscription ID (required)
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Google Gemini API key (required)
+gemini_api_key = "YOUR_GEMINI_API_KEY"
+
+# Azure region to deploy resources
+location = "eastus"
+
+# Resource group name
+resource_group_name = "your-resource-group"
+
+# Storage account name (must be globally unique, lowercase, no spaces or special characters)
+storage_account_name = "yourstorageaccountname"
+
+# Function app name (must be globally unique)
+function_app_name = "your-function-app-name"
+
+# Key vault name (must be globally unique)
+key_vault_name = "your-key-vault-name"
+
+# Document intelligence resource name (must be globally unique)
+document_intelligence_name = "your-docintel-name"
+
+# Storage container name
+storage_container_name = "your-resumes-container"

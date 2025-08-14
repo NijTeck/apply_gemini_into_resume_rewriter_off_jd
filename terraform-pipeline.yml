@@ -1,0 +1,207 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - src/*
+      - Dockerfile
+      - terraform/*
+      - requirements.txt
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Container Registry related variables
+  containerRegistry: '<your-acr-name>.azurecr.io'
+  imageRepository: 'resume-optimizer'
+  tag: '$(Build.BuildId)'
+  
+  # Azure resources
+  azureSubscription: '<your-azure-service-connection>'
+  resourceGroup: '<your-resource-group>'
+  containerAppName: '<your-container-app-name>'
+  location: 'eastus'
+  
+  # Terraform variables
+  terraformVersion: '1.5.7'
+  terraformWorkingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
+  terraformBackendResourceGroup: '<your-tf-backend-rg>'
+  terraformBackendStorageAccount: '<your-tf-backend-storage>'
+  terraformBackendContainer: 'tfstate'
+  terraformBackendKey: 'resume-optimizer.tfstate'
+
+stages:
+- stage: Terraform
+  displayName: 'Terraform Infrastructure Deployment'
+  jobs:
+  - job: Terraform
+    displayName: 'Terraform Plan and Apply'
+    steps:
+    - task: TerraformInstaller@0
+      displayName: 'Install Terraform $(terraformVersion)'
+      inputs:
+        terraformVersion: '$(terraformVersion)'
+    
+    - task: TerraformTaskV3@3
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(terraformWorkingDirectory)'
+        backendServiceArm: '$(azureSubscription)'
+        backendAzureRmResourceGroupName: '$(terraformBackendResourceGroup)'
+        backendAzureRmStorageAccountName: '$(terraformBackendStorageAccount)'
+        backendAzureRmContainerName: '$(terraformBackendContainer)'
+        backendAzureRmKey: '$(terraformBackendKey)'
+    
+    - task: TerraformTaskV3@3
+      displayName: 'Terraform Plan'
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(terraformWorkingDirectory)'
+        environmentServiceNameAzureRM: '$(azureSubscription)'
+        commandOptions: '-var-file=terraform.tfvars -out=tfplan'
+    
+    - task: TerraformTaskV3@3
+      displayName: 'Terraform Apply'
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: '$(terraformWorkingDirectory)'
+        environmentServiceNameAzureRM: '$(azureSubscription)'
+        commandOptions: 'tfplan'
+
+- stage: Build
+  displayName: 'Build and Push Docker Image'
+  dependsOn: Terraform
+  jobs:
+  - job: BuildAndPush
+    displayName: 'Build and Push'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Build and Push Docker Image'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Login to ACR
+          az acr login --name $(acrName)
+          
+          # Build the Docker image
+          docker build -t $(containerRegistry)/$(imageRepository):$(tag) -t $(containerRegistry)/$(imageRepository):latest .
+          
+          # Push the Docker image to ACR
+          docker push $(containerRegistry)/$(imageRepository):$(tag)
+          docker push $(containerRegistry)/$(imageRepository):latest
+
+- stage: Deploy
+  displayName: 'Deploy to Azure Container Apps'
+  dependsOn: Build
+  jobs:
+  - job: Deploy
+    displayName: 'Deploy Container App'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Get Terraform Outputs'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        workingDirectory: '$(terraformWorkingDirectory)'
+        inlineScript: |
+          # Initialize terraform to read state
+          terraform init \
+            -backend-config="resource_group_name=$(terraformBackendResourceGroup)" \
+            -backend-config="storage_account_name=$(terraformBackendStorageAccount)" \
+            -backend-config="container_name=$(terraformBackendContainer)" \
+            -backend-config="key=$(terraformBackendKey)"
+          
+          # Get output values
+          STORAGE_ACCOUNT_NAME=$(terraform output -raw storage_account_name)
+          CONTAINER_APP_NAME=$(terraform output -raw container_app_name)
+          RESOURCE_GROUP=$(terraform output -raw resource_group_name)
+          
+          # Set pipeline variables for later use
+          echo "##vso[task.setvariable variable=storageAccountName]$STORAGE_ACCOUNT_NAME"
+          echo "##vso[task.setvariable variable=containerAppName]$CONTAINER_APP_NAME"
+          echo "##vso[task.setvariable variable=resourceGroup]$RESOURCE_GROUP"
+    
+    - task: AzureCLI@2
+      displayName: 'Set Environment Variables'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Get Storage Connection String
+          STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
+            --name $(storageAccountName) \
+            --resource-group $(resourceGroup) \
+            --query connectionString \
+            --output tsv)
+          
+          # Set environment variables in Container App
+          az containerapp update \
+            --name $(containerAppName) \
+            --resource-group $(resourceGroup) \
+            --set-env-vars \
+            "GEMINI_API_KEY=$(GEMINI_API_KEY)" \
+            "STORAGE_CONNECTION_STRING=$STORAGE_CONNECTION_STRING" \
+            "RESUME_CONTAINER_NAME=resumes"
+    
+    - task: AzureCLI@2
+      displayName: 'Update Container App with new image'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az containerapp update \
+            --name $(containerAppName) \
+            --resource-group $(resourceGroup) \
+            --image $(containerRegistry)/$(imageRepository):latest
+    
+    - task: AzureCLI@2
+      displayName: 'Verify Deployment'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Get the FQDN of the deployed app
+          FQDN=$(az containerapp show \
+            --name $(containerAppName) \
+            --resource-group $(resourceGroup) \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          
+          echo "Application deployed to: https://$FQDN"
+          echo "##vso[task.setvariable variable=appFqdn;isOutput=true]$FQDN"
+        name: 'setFqdnVariable'
+
+- stage: Test
+  displayName: 'Test Deployment'
+  dependsOn: Deploy
+  jobs:
+  - job: TestEndpoint
+    displayName: 'Test API Endpoint'
+    variables:
+      appFqdn: $[ stageDependencies.Deploy.Deploy.outputs['setFqdnVariable.appFqdn'] ]
+    steps:
+    - script: |
+        # Test the API endpoint
+        RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" https://$(appFqdn)/api/optimize)
+        echo "Response code: $RESPONSE_CODE"
+        
+        if [ "$RESPONSE_CODE" = "200" ] || [ "$RESPONSE_CODE" = "400" ]; then
+          echo "API endpoint is reachable!"
+          exit 0
+        else
+          echo "API endpoint check failed with response code: $RESPONSE_CODE"
+          exit 1
+        fi
+      displayName: 'Test API Endpoint'

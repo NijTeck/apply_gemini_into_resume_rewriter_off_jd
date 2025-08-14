@@ -1,0 +1,82 @@
+*.env
+.env
+*.tfvars
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+tfplan
+*.log
+__pycache__/
+.pytest_cache/
+.vscode/
+.DS_Store
+*.docx
+*.pdf
+*.local
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+.venv
+
+# IDE files
+.idea/
+
+*.swp
+*.swo
+.DS_Store
+
+# Azure and deployment
+.azure/
+.credentials/
+local.settings.json
+*.pubxml
+*.publishsettings
+
+# Docker
+.docker/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Build artifacts
+node_modules/
+tmp/
+temp/
+
+# Personal files
+personal/
+*.pem
+*.key
+*.bak
+
+# Test files
+test-results/
+.coverage
+htmlcov/
+.pytest_cache/ 

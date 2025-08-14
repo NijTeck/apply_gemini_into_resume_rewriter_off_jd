@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Resume Optimizer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Resume Optimizer</h1>
+        
+        <!-- Tab navigation -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="openTab(event, 'analyze')">Analyze Resume</button>
+            <button class="tab-button" onclick="openTab(event, 'rewrite')">Rewrite Resume</button>
+        </div>
+        
+        <!-- Analyze Resume Tab -->
+        <div id="analyze" class="tab-content active">
+            <p>Upload your resume and a job description to get tailored recommendations.</p>
+            
+            <form id="analyzeForm">
+                <div class="form-group">
+                    <label for="resumeAnalyze">Resume (PDF/DOCX)</label>
+                    <input type="file" id="resumeAnalyze" name="resume" accept=".pdf,.docx" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="jobDescriptionAnalyze">Job Description</label>
+                    <textarea id="jobDescriptionAnalyze" name="job_description" placeholder="Paste job description here..." required></textarea>
+                </div>
+                
+                <button type="submit">Analyze Resume</button>
+            </form>
+            
+            <div id="analyzeResults" class="results">
+                <h2>Recommendations</h2>
+                
+                <div class="section">
+                    <div class="section-title">Matching Skills</div>
+                    <div id="matching-skills"></div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Missing Skills</div>
+                    <div id="missing-skills"></div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Improvement Suggestions</div>
+                    <ul id="improvement-suggestions"></ul>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Potential Red Flags</div>
+                    <ul id="potential-red-flags"></ul>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Experience Tailoring</div>
+                    <ul id="experience-tailoring"></ul>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Gap Analysis</div>
+                    <div id="gap-analysis"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Rewrite Resume Tab -->
+        <div id="rewrite" class="tab-content">
+            <p>Upload your resume and a job description to create a tailored resume optimized for the job.</p>
+            
+            <form id="rewriteForm">
+                <div class="form-group">
+                    <label for="resumeRewrite">Resume (PDF/DOCX)</label>
+                    <input type="file" id="resumeRewrite" name="resume" accept=".pdf,.docx" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="jobDescriptionRewrite">Job Description</label>
+                    <textarea id="jobDescriptionRewrite" name="job_description" placeholder="Paste job description here..." required></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="userName">Your Name</label>
+                    <input type="text" id="userName" name="user_name" placeholder="Enter your name" required>
+                </div>
+                
+                <button type="submit">Rewrite Resume</button>
+            </form>
+            
+            <div id="rewriteResults" class="results">
+                <h2>Rewritten Resume</h2>
+                
+                <div class="section">
+                    <div class="section-title">Download</div>
+                    <div id="download-link"></div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Job Details</div>
+                    <div id="job-details"></div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Integration Percentage</div>
+                    <div id="integration-percentage"></div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Changes Made</div>
+                    <ul id="changes-summary"></ul>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Highlighted Skills</div>
+                    <ul id="highlighted-skills"></ul>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">Remaining Gaps</div>
+                    <ul id="gap-summary"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/script.js"></script>
+</body>
+</html> 

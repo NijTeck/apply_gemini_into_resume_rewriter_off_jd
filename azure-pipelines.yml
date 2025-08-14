@@ -1,0 +1,321 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - Dockerfile
+      - app.py
+      - src/**
+      - templates/**
+      - static/**
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: containerRegistry
+    value: '<your-acr-name>.azurecr.io'
+  - name: acrName
+    value: '<your-acr-name>'
+  - name: imageRepository
+    value: 'resume-optimizer'
+  - name: tag
+    value: '$(Build.BuildId)'
+  - name: azureSubscription
+    value: '<your-azure-service-connection>'
+  - name: resourceGroup
+    value: '<your-resource-group>'
+  - name: containerAppName
+    value: '<your-container-app-name>'
+  - name: storageAccountName
+    value: '<your-storage-account>'
+  - name: storageContainerName
+    value: 'resumes'
+  - name: SUBSCRIPTION_ID
+    value: '<your-subscription-id>'
+  - group: '<your-variable-group>'
+
+stages:
+- stage: BuildAndDeploy
+  displayName: 'Build and Deploy'
+  jobs:
+  - job: Deploy
+    displayName: 'Deploy Application'
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Diagnose Service Principal Permissions'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Set the correct subscription
+          echo "Setting subscription to $(SUBSCRIPTION_ID)..."
+          az account set --subscription "$(SUBSCRIPTION_ID)"
+          
+          # Show current user/service principal info
+          echo "Current Azure identity:"
+          az account show
+          
+          # Check if we can list resources in the resource group
+          echo "Attempting to list resources in resource group $(resourceGroup)..."
+          az resource list --resource-group $(resourceGroup) -o table
+          
+          # Check service principal assignments
+          echo "Checking role assignments for service principal..."
+          SP_ID=$(az account show --query user.name -o tsv)
+          az role assignment list --assignee "$SP_ID" --all -o table
+          
+          echo "Listing available Container App Environments..."
+          az containerapp env list --output table
+
+    - task: AzureCLI@2
+      displayName: 'Create Resource Group and Register Providers'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Set the correct subscription
+          echo "Setting subscription to $(SUBSCRIPTION_ID)..."
+          az account set --subscription "$(SUBSCRIPTION_ID)"
+          
+          # Create resource group if it doesn't exist
+          echo "Checking if resource group $(resourceGroup) exists..."
+          if ! az group show --name $(resourceGroup) --output none 2>/dev/null; then
+            echo "Creating resource group $(resourceGroup)..."
+            az group create --name $(resourceGroup) --location "East US"
+          fi
+          
+          # Register required resource providers
+          echo "Registering required resource providers..."
+          az provider register --namespace Microsoft.App --wait
+          az provider register --namespace Microsoft.OperationalInsights --wait
+          az provider register --namespace Microsoft.ContainerRegistry --wait
+          
+          echo "Resource providers registered successfully"
+
+    - task: AzureCLI@2
+      displayName: 'Create ACR if needed'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Set the correct subscription
+          echo "Setting subscription to $(SUBSCRIPTION_ID)..."
+          az account set --subscription "$(SUBSCRIPTION_ID)"
+          
+          # Check if ACR exists, create if not
+          if ! az acr show --name $(acrName) --resource-group $(resourceGroup) --output none 2>/dev/null; then
+            echo "Creating Azure Container Registry $(acrName)..."
+            az acr create \
+              --resource-group $(resourceGroup) \
+              --name $(acrName) \
+              --sku Standard \
+              --admin-enabled true
+            sleep 30
+          fi
+          
+          # Get ACR credentials
+          ACR_USERNAME=$(az acr credential show --name $(acrName) --resource-group $(resourceGroup) --query username --output tsv)
+          ACR_PASSWORD=$(az acr credential show --name $(acrName) --resource-group $(resourceGroup) --query "passwords[0].value" --output tsv)
+          
+          # Save to pipeline variables
+          echo "##vso[task.setvariable variable=acrUsername]$ACR_USERNAME"
+          echo "##vso[task.setvariable variable=acrPassword]$ACR_PASSWORD"
+
+    - task: AzureCLI@2
+      displayName: 'Build and Push Docker Image'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Set the correct subscription
+          echo "Setting subscription to $(SUBSCRIPTION_ID)..."
+          az account set --subscription "$(SUBSCRIPTION_ID)"
+          
+          # Debug variables (values will be masked in logs)
+          echo "ACR Registry: $(containerRegistry)"
+          echo "ACR Username is set: $([[ -n "$(ACR_USERNAME)" ]] && echo "Yes" || echo "No")"
+          echo "ACR Password is set: $([[ -n "$(ACR_PASSWORD)" ]] && echo "Yes" || echo "No")"
+          
+          # Login to ACR using multiple methods to ensure one works
+          
+          # Method 1: Direct docker login with pipeline variables
+          echo "Attempting docker login with pipeline variables..."
+          echo "$(ACR_PASSWORD)" | docker login $(containerRegistry) -u "$(ACR_USERNAME)" --password-stdin
+          if [ $? -ne 0 ]; then
+            echo "Direct docker login failed, trying method 2..."
+            
+            # Method 2: Get fresh credentials from ACR and use them
+            echo "Getting fresh credentials from ACR..."
+            export ACR_USER=$(az acr credential show --name $(acrName) --resource-group $(resourceGroup) --query username --output tsv)
+            export ACR_PASS=$(az acr credential show --name $(acrName) --resource-group $(resourceGroup) --query "passwords[0].value" --output tsv)
+            echo "Got username: $ACR_USER"
+            echo "Password length: ${#ACR_PASS}"
+            
+            echo "Logging in with fresh credentials..."
+            echo "$ACR_PASS" | docker login $(containerRegistry) -u "$ACR_USER" --password-stdin
+            if [ $? -ne 0 ]; then
+              echo "Method 2 failed, trying method 3..."
+              
+              # Method 3: Use az acr login
+              echo "Trying az acr login..."
+              az acr login --name $(acrName)
+              if [ $? -ne 0 ]; then
+                echo "All login methods failed. Cannot proceed with pushing images."
+                exit 1
+              fi
+            fi
+          fi
+          
+          echo "ACR login successful"
+          
+          # Check project structure
+          echo "Current directory contents:"
+          ls -la
+          
+          # Build using the main Dockerfile
+          echo "Building Docker image..."
+          docker build -t $(containerRegistry)/$(imageRepository):$(tag) -t $(containerRegistry)/$(imageRepository):latest .
+          
+          # Test running the container locally
+          echo "Testing container startup locally..."
+          docker run --rm -d --name test-container $(containerRegistry)/$(imageRepository):$(tag)
+          sleep 5
+          docker logs test-container
+          docker stop test-container || true
+          
+          # Verify docker login status before pushing
+          echo "Verifying docker login status..."
+          docker login --password-stdin $(containerRegistry) -u "$(ACR_USERNAME)" < <(echo "$(ACR_PASSWORD)")
+          
+          echo "Pushing Docker image..."
+          docker push $(containerRegistry)/$(imageRepository):$(tag)
+          if [ $? -ne 0 ]; then
+            echo "Push failed. Attempting login with az acr login as last resort..."
+            az acr login --name $(acrName)
+            docker push $(containerRegistry)/$(imageRepository):$(tag)
+          fi
+          docker push $(containerRegistry)/$(imageRepository):latest
+
+    - task: AzureCLI@2
+      displayName: 'Create Container App Environment If Not Exists'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Set the correct subscription
+          echo "Setting subscription to $(SUBSCRIPTION_ID)..."
+          az account set --subscription "$(SUBSCRIPTION_ID)"
+          
+          # Make sure Container App environment exists  
+          if ! az containerapp env show --name <your-containerapp-env> --resource-group $(resourceGroup) --output none 2>/dev/null; then
+            echo "Creating container app environment..."
+            az containerapp env create \
+              --name <your-containerapp-env> \
+              --resource-group $(resourceGroup) \
+              --location "East US" \
+              --logs-workspace-id default
+          fi
+
+    - task: AzureCLI@2
+      displayName: 'Create Container App If Not Exists'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Set the correct subscription
+          echo "Setting subscription to $(SUBSCRIPTION_ID)..."
+          az account set --subscription "$(SUBSCRIPTION_ID)"
+          
+          # Check if Container App exists
+          if ! az containerapp show --name $(containerAppName) --resource-group $(resourceGroup) --output none 2>/dev/null; then
+            # Use pipeline variables directly for ACR credentials
+            echo "Using pipeline variables for ACR credentials..."
+              
+            # Create container app
+            echo "Creating new container app..."
+            az containerapp create \
+              --name $(containerAppName) \
+              --resource-group $(resourceGroup) \
+              --environment <your-containerapp-env> \
+              --image $(containerRegistry)/$(imageRepository):latest \
+              --registry-server $(containerRegistry) \
+              --registry-username "$(ACR_USERNAME)" \
+              --registry-password "$(ACR_PASSWORD)" \
+              --ingress external \
+              --target-port 8000 \
+              --min-replicas 1 \
+              --env-vars \
+                DEBUG="true" \
+                PYTHONUNBUFFERED="1" \
+                PYTHONPATH="/app" \
+                GEMINI_API_KEY="$(GEMINI_API_KEY)" \
+                BLOB_CONNECTION_STRING="$(BLOB_CONNECTION_STRING)" \
+                RESUME_CONTAINER_NAME="resume" \
+                TAILORED_RESUME_CONTAINER_NAME="tailoredresumecontainer" \
+                TRACKING_CONTAINER_NAME="trackingcontainer" \
+                TRACKING_FILE_NAME="resume_tracking.csv"
+          else
+            echo "Container app already exists, will update via deploy script."
+          fi
+          
+    # Grant execute permission to deploy.sh and use it for updates
+    # Removed deploy.sh step; updates handled directly via Azure CLI tasks
+        
+    - task: AzureCLI@2
+      displayName: 'Update Container App Using RBAC'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Set the correct subscription
+          echo "Setting subscription to $(SUBSCRIPTION_ID)..."
+          az account set --subscription "$(SUBSCRIPTION_ID)"
+          
+          # Check if Container App exists by listing all container apps
+          echo "Listing all container apps in subscription..."
+          az containerapp list --output table
+          
+          # Try explicit resource ID approach
+          echo "Trying to update container app with explicit resource ID..."
+          
+          # Set the container app resource ID with correct subscription ID
+          CONTAINER_APP_ID="/subscriptions/$(SUBSCRIPTION_ID)/resourceGroups/$(resourceGroup)/providers/Microsoft.App/containerApps/$(containerAppName)"
+          
+          # Update container app with image
+          az containerapp update \
+            --ids "$CONTAINER_APP_ID" \
+            --image $(containerRegistry)/$(imageRepository):latest \
+            --registry-server $(containerRegistry) \
+            --registry-username "$(ACR_USERNAME)" \
+            --registry-password "$(ACR_PASSWORD)"
+        
+          # Update environment variables
+          echo "Updating container app environment variables with explicit resource ID..."
+          az containerapp update \
+            --ids "$CONTAINER_APP_ID" \
+            --set-env-vars \
+              DEBUG="true" \
+              PYTHONUNBUFFERED="1" \
+              PYTHONPATH="/app" \
+              FLASK_APP="app.py" \
+              FLASK_ENV="production" \
+              FLASK_DEBUG="0" \
+              GEMINI_API_KEY="$(GEMINI_API_KEY)" \
+              GEMINI_MODEL_ID="gemini-1.5-pro-latest" \
+              BLOB_CONNECTION_STRING="$(BLOB_CONNECTION_STRING)" \
+              RESUME_CONTAINER_NAME="resume" \
+              TAILORED_RESUME_CONTAINER_NAME="tailoredresumecontainer" \
+              TRACKING_CONTAINER_NAME="trackingcontainer" \
+              TRACKING_FILE_NAME="resume_tracking.csv"
+              
+          echo "Deployment completed"
+
