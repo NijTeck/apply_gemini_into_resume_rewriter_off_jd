@@ -181,4 +181,6 @@ If migrating from Azure DevOps:
 For issues with:
 - **GitHub Actions**: Check the Actions tab in your repository
 - **Azure resources**: Use Azure CLI to verify resource status
-- **Container deployment**: Check Container Apps logs in Azure Portal 
+- **Container deployment**: Check Container Apps logs in Azure Portal
+
+- Let me know if you have any questions ( write a discussion ) 
